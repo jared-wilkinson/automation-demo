@@ -1,0 +1,101 @@
+Description: >
+    A simple Load Balancer, Auto-Scaling Group, and ECS (Redis) infrastructure setup.
+
+Resources:  
+  FunLoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: "FunLoadBalancer"
+      Scheme: "internet-facing"
+      SecurityGroups:
+        - "sg-8dc83bea"
+      Subnets:
+        - "subnet-b6a8ce9d"
+        - "subnet-9dd78cea"
+      Type: "application"
+      IpAddressType: "ipv4"
+  
+  FunListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions:
+      - Type: "forward"
+        TargetGroupArn:
+          Ref: "FunTargetGroup"
+      LoadBalancerArn:
+        Ref: "FunLoadBalancer"
+      Port: '80'
+      Protocol: "HTTP"
+
+  FunTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      VpcId: "vpc-b1b3b8d4"
+      Port: '80'
+      Protocol: "HTTP"
+      Matcher: 
+          HttpCode: '200-299'
+      HealthCheckIntervalSeconds: '10'
+      HealthCheckPath: "/"
+      HealthCheckProtocol: "HTTP"
+      HealthCheckTimeoutSeconds: '5'
+      HealthyThresholdCount: '2'
+  
+  FunLaunchConfiguration:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      ImageId: "ami-1853ac65"
+      InstanceMonitoring: false
+      InstanceType: "t1.micro"
+      KeyName: "may2018"
+      SecurityGroups: 
+      - "default"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum install -y httpd
+          service httpd start
+          echo `hostname` > /var/www/html/index.html
+    
+  FunAutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      AutoScalingGroupName: "FunAutoScalingGroup"
+      AvailabilityZones:
+      - "us-east-1a"
+      - "us-east-1b"
+      Cooldown: '300'
+      DesiredCapacity: '2'
+      HealthCheckGracePeriod: '300'
+      HealthCheckType: "ELB"
+      LaunchConfigurationName: 
+        Ref: "FunLaunchConfiguration"
+      MaxSize: '4'
+      MinSize: '2'
+      TargetGroupARNs:
+      - Ref: "FunTargetGroup"
+
+  FunElasticacheSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Elasticache Security Group"
+      SecurityGroupIngress:
+        -
+          IpProtocol: "tcp"
+          FromPort: "11211"
+          ToPort: "11211"
+          SourceSecurityGroupName: "default"
+  
+  FunElasticacheCluster:
+    Type: "AWS::ElastiCache::CacheCluster"
+    Properties:
+      Engine: "redis"
+      EngineVersion: "3.2.10"
+      CacheNodeType: "cache.t2.micro"
+      ClusterName: "FunRedisCluster"
+      NumCacheNodes: "1"
+      VpcSecurityGroupIds:
+        -
+          Fn::GetAtt:
+            - "FunElasticacheSecurityGroup"
+            - "GroupId"
